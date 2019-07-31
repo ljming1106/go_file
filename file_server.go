@@ -19,6 +19,7 @@ var waitGroup = sync.WaitGroup{}
 type netAccess interface {
 	access()
 	handleConn(interface{})
+	deferDeal(interface{})
 }
 
 type httpWay string
@@ -39,11 +40,13 @@ func (httpDo httpWay) access() {
 }
 func (httpDo httpWay) handleConn(interface{}) {
 }
+func (httpDo httpWay) deferDeal(interface{}) {
+}
 
 /*TCP*/
 func (tcpDo tcpWay) access() {
 	listener, err := net.Listen("tcp", "localhost:8001")
-	defer deferTcpDeal(listener)
+	defer tcpDo.deferDeal(listener)
 	if err != nil {
 		log.Println(err.Error())
 		return
@@ -64,6 +67,11 @@ func (tcpDo tcpWay) handleConn(conn interface{}) {
 	defer c.Close()
 	res := dealReadData()
 	io.WriteString(c, res)
+}
+func (tcpDo tcpWay) deferDeal(conn interface{}) {
+	var c net.Listener = conn.(net.Listener)
+	waitGroup.Done()
+	c.Close()
 }
 
 /*UDP*/
@@ -86,11 +94,15 @@ func (udpDo udpWay) handleConn(conn interface{}) {
 	if err != nil {
 		log.Panicln("ReadFrom err", err.Error())
 	}
-	go handleUdpConn1(c, remoteAddr)
+	go handleUdpConn1(udpDo, c, remoteAddr)
+}
+func (udpDo udpWay) deferDeal(conn interface{}) {
+	var c net.PacketConn = conn.(net.PacketConn)
+	c.Close()
 }
 
-func handleUdpConn1(conn net.PacketConn, remoteAddr net.Addr) {
-	defer deferUdpDeal(conn)
+func handleUdpConn1(udpDo udpWay, conn net.PacketConn, remoteAddr net.Addr) {
+	defer udpDo.deferDeal(conn)
 	res := dealReadData()
 	conn.WriteTo([]byte(res), remoteAddr)
 }
@@ -115,21 +127,12 @@ func main() {
 
 	accessWay := [...]netAccess{httpDo, tcpDo, udpDo}
 	for _, Type := range accessWay {
-		  go Type.access()
-		}
+		go Type.access()
+	}
 	//设置信号量，等待返回goroutine返回才结束
 	waitGroup.Add(2)
 	waitGroup.Wait()
 	fmt.Println("所有groutine已经退出")
-}
-
-func deferTcpDeal(c net.Listener) {
-	waitGroup.Done()
-	c.Close()
-}
-
-func deferUdpDeal(c net.PacketConn) {
-	c.Close()
 }
 
 func dealReadData() string {
